@@ -11,7 +11,8 @@ namespace TempestBuffPlugin
     public class TempestBuff : TerrariaPlugin
     {
         public override string Name => "TempestBuff";
-        public override Version Version => new Version(1, 1, 0);
+        public override System.Version Version => new System.Version(1, 1, 0);
+
         public override Author => "CustomPlugin";
         public override string Description => "Buff Tempest Staff yang kecepatannya bisa diatur langsung lewat command.";
 
