@@ -18,7 +18,7 @@ namespace TempestBuffPlugin
         private int updateCounter = 0;
 
         private float speedMultiplier = 1.5f;
-        private float homingStrength = 0.07f;
+        private float homingStrength = 0.18f;
 
         public TempestBuff(Main game) : base(game) { }
 
