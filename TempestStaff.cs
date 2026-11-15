@@ -11,11 +11,14 @@ namespace TempestBuffPlugin
     public class TempestBuff : TerrariaPlugin
     {
         public override string Name => "TempestBuff";
-        public override Version Version => new Version(1, 0, 0);
+        public override Version Version => new Version(1, 1, 0);
         public override Author => "CustomPlugin";
-        public override string Description => "Buff Tempest Staff: Ukuran -10%, Kecepatan 1.5x, dan Soft Homing seimbang.";
+        public override string Description => "Buff Tempest Staff yang kecepatannya bisa diatur langsung lewat command.";
 
         private int updateCounter = 0;
+
+        private float speedMultiplier = 1.5f;
+        private float homingStrength = 0.07f;
 
         public TempestBuff(Main game) : base(game) { }
 
@@ -24,9 +27,9 @@ namespace TempestBuffPlugin
             ServerApi.Hooks.ProjectileSetDefaults.Register(this, OnProjectileSetDefaults);
             ServerApi.Hooks.GameUpdate.Register(this, OnGameUpdate);
 
-            Commands.ChatCommands.Add(new Command("tempest.buff", TempestInfoCommand, "tempestbuff", "tbuff")
+            Commands.ChatCommands.Add(new Command("tempest.buff", TempestCommand, "tempestbuff", "tbuff")
             {
-                HelpText = "Melihat status buff Tempest Staff."
+                HelpText = "Gunakan /tbuff [speed <angka> | homing <angka>]"
             });
         }
 
@@ -40,9 +43,43 @@ namespace TempestBuffPlugin
             base.Dispose(disposing);
         }
 
-        private void TempestInfoCommand(CommandArgs args)
+        private void TempestCommand(CommandArgs args)
         {
-            args.Player.SendInfoMessage("[Tempest Buff] Aktif! Ukuran minion & proyektil -10% (0.9x), kecepatan 1.5x, dan proyektil memiliki soft homing.");
+            if (args.Parameters.Count == 0)
+            {
+                args.Player.SendInfoMessage($"[Tempest Buff] Speed: {speedMultiplier}x | Homing: {homingStrength} | Ukuran: -10% (0.9x).");
+                args.Player.SendInfoMessage("Cara ubah: /tbuff speed <angka> (contoh: 1.5) atau /tbuff homing <angka> (contoh: 0.07)");
+                return;
+            }
+
+            string sub = args.Parameters[0].ToLower();
+
+            if (sub == "speed" && args.Parameters.Count >= 2 && float.TryParse(args.Parameters[1], out float newSpeed))
+            {
+                if (newSpeed < 0.5f || newSpeed > 5.0f)
+                {
+                    args.Player.SendErrorMessage("[Tempest Buff] Kecepatan harus antara 0.5 sampai 5.0!");
+                    return;
+                }
+
+                speedMultiplier = newSpeed;
+                args.Player.SendSuccessMessage($"[Tempest Buff] Kecepatan proyektil diatur ke {speedMultiplier}x!");
+            }
+            else if (sub == "homing" && args.Parameters.Count >= 2 && float.TryParse(args.Parameters[1], out float newHoming))
+            {
+                if (newHoming < 0f || newHoming > 0.5f)
+                {
+                    args.Player.SendErrorMessage("[Tempest Buff] Kekuatan homing harus antara 0 (mati) sampai 0.5!");
+                    return;
+                }
+
+                homingStrength = newHoming;
+                args.Player.SendSuccessMessage($"[Tempest Buff] Kekuatan homing diatur ke {homingStrength}!");
+            }
+            else
+            {
+                args.Player.SendErrorMessage("Format salah! Gunakan: /tbuff, /tbuff speed <angka>, atau /tbuff homing <angka>");
+            }
         }
 
         private void OnProjectileSetDefaults(SetDefaultsEventArgs<Projectile, int> args)
@@ -51,18 +88,15 @@ namespace TempestBuffPlugin
             if (proj == null)
                 return;
 
-            // 1. Minion Sharknado (ProjectileID.Tempest) & Proyektil Hiu Kecil (ProjectileID.MiniSharkron)
             if (proj.type == ProjectileID.Tempest || proj.type == ProjectileID.MiniSharkron)
             {
-                // Ukuran 10% lebih kecil (0.9x)
                 proj.scale *= 0.9f;
                 proj.width = (int)Math.Max(4, Math.Round(proj.width * 0.9f));
                 proj.height = (int)Math.Max(4, Math.Round(proj.height * 0.9f));
 
-                // Kecepatan gerak minion Sharknado 1.5x lebih cepat
                 if (proj.type == ProjectileID.Tempest)
                 {
-                    proj.extraUpdates = 1; // Membantu pergerakan minion lebih responsif
+                    proj.extraUpdates = 1;
                 }
             }
         }
@@ -84,20 +118,16 @@ namespace TempestBuffPlugin
                 if (tsPlayer == null || !tsPlayer.Active || !tsPlayer.HasPermission("tempest.buff"))
                     continue;
 
-                // Terapkan pada proyektil tembakan hiu kecil dari Tempest Staff
                 if (proj.type == ProjectileID.MiniSharkron)
                 {
-                    // Pada awal kemunculan proyektil (timeLeft masih penuh), tingkatkan kecepatan 1.5x
-                    // MiniSharkron default timeLeft adalah 360
                     if (proj.timeLeft >= 358 && proj.localAI[1] == 0f)
                     {
-                        proj.velocity *= 1.5f;
-                        proj.localAI[1] = 1f; // Tandai agar tidak dikali 1.5x berulang kali
+                        proj.velocity *= speedMultiplier;
+                        proj.localAI[1] = 1f;
                         NetMessage.SendData((int)PacketTypes.ProjectileNew, -1, -1, null, proj.whoAmI);
                     }
 
-                    // Soft Homing setiap 3 tick agar halus, ringan untuk server, dan tidak terlalu OP
-                    if (updateCounter % 3 == 0)
+                    if (homingStrength > 0f && updateCounter % 3 == 0)
                     {
                         ApplySoftHoming(proj);
                     }
@@ -107,7 +137,7 @@ namespace TempestBuffPlugin
 
         private void ApplySoftHoming(Projectile proj)
         {
-            float maxDetectDistance = 400f; // ~25 blok jarak deteksi
+            float maxDetectDistance = 400f;
             NPC closestTarget = null;
             float closestDist = maxDetectDistance;
 
@@ -119,7 +149,6 @@ namespace TempestBuffPlugin
                     float dist = Vector2.Distance(proj.Center, npc.Center);
                     if (dist < closestDist)
                     {
-                        // Pastikan musuh masih dalam jangkauan pandang (tidak menembus tembok tebal)
                         if (Collision.CanHitLine(proj.position, proj.width, proj.height, npc.position, npc.width, npc.height))
                         {
                             closestDist = dist;
@@ -139,11 +168,7 @@ namespace TempestBuffPlugin
                 desiredDirection.Normalize();
                 Vector2 desiredVelocity = desiredDirection * currentSpeed;
 
-                // Faktor belok lembut (0.07f = ~7% belokan tiap update, cukup untuk melengkung tapi tidak auto-lock 100%)
-                float turnStrength = 0.07f;
-                proj.velocity = Vector2.Lerp(proj.velocity, desiredVelocity, turnStrength);
-
-                // Jaga kecepatan tetap konsisten di 1.5x
+                proj.velocity = Vector2.Lerp(proj.velocity, desiredVelocity, homingStrength);
                 proj.velocity.Normalize();
                 proj.velocity *= currentSpeed;
 
