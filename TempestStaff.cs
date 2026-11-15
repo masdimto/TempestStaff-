@@ -12,7 +12,7 @@ namespace TempestBuffPlugin
     {
         public override string Name => "TempestBuff";
         public override System.Version Version => new System.Version(1, 1, 0);
-        public override Author => "CustomPlugin";
+        public override string Author => "CustomPlugin";
         public override string Description => "Buff Tempest Staff yang kecepatannya bisa diatur langsung lewat command.";
 
         private int updateCounter = 0;
