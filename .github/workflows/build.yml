@@ -1,1 +1,49 @@
+name: Build TShock Plugin
 
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build Release
+        run: dotnet build -c Release --no-restore
+
+      - name: Siapkan file DLL Plugin
+        run: |
+          mkdir -p output
+          find . -path "*/bin/Release/net9.0/*.dll" \
+            ! -name "TShockAPI.dll" \
+            ! -name "OTAPI*.dll" \
+            ! -name "TerrariaServer.dll" \
+            ! -name "ModFramework.dll" \
+            ! -name "Newtonsoft.Json.dll" \
+            ! -name "BCrypt.Net-Next.dll" \
+            ! -name "HttpServer.dll" \
+            ! -name "MySqlConnector.dll" \
+            ! -name "Microsoft.*.dll" \
+            ! -name "System.*.dll" \
+            -exec cp {} output/ \;
+
+      - name: Upload Hasil Plugin (.dll)
+        uses: actions/upload-artifact@v4
+        with:
+          name: TShock-Plugin-DLL
+          path: output/*.dll
