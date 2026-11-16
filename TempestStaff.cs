@@ -1,35 +1,32 @@
 using System;
+using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.ID;
 using TerrariaApi.Server;
 using TShockAPI;
-using Microsoft.Xna.Framework;
 
-namespace TempestBuffPlugin
+namespace TempestStaffBuffPlugin
 {
     [ApiVersion(2, 1)]
-    public class TempestBuff : TerrariaPlugin
+    public class TempestStaffBuff : TerrariaPlugin
     {
-        public override string Name => "TempestBuff";
-        public override System.Version Version => new System.Version(1, 1, 0);
+        public override string Name => "TempestStaffBuff";
+        public override System.Version Version => new System.Version(1, 0, 0);
         public override string Author => "CustomPlugin";
-        public override string Description => "Buff Tempest Staff yang kecepatannya bisa diatur langsung lewat command.";
+        public override string Description => "Buff Tempest Staff: Proyektil Mini Sharkron otomatis homing ke musuh terdekat (0.18).";
 
-        private int updateCounter = 0;
+        private const float HomingStrength = 0.18f;
+        private const float MaxHomingRange = 900f;
 
-        private float speedMultiplier = 1.5f;
-        private float homingStrength = 0.18f;
-
-        public TempestBuff(Main game) : base(game) { }
+        public TempestStaffBuff(Main game) : base(game) { }
 
         public override void Initialize()
         {
-            ServerApi.Hooks.ProjectileSetDefaults.Register(this, OnProjectileSetDefaults);
             ServerApi.Hooks.GameUpdate.Register(this, OnGameUpdate);
 
-            Commands.ChatCommands.Add(new Command("tempest.buff", TempestCommand, "tempestbuff", "tbuff")
+            Commands.ChatCommands.Add(new Command("tempest.buff", CheckStatusCommand, "tempest", "tempestbuff")
             {
-                HelpText = "Gunakan /tbuff [speed <angka> | homing <angka>]"
+                HelpText = "Mengecek status buff Tempest Staff."
             });
         }
 
@@ -37,143 +34,79 @@ namespace TempestBuffPlugin
         {
             if (disposing)
             {
-                ServerApi.Hooks.ProjectileSetDefaults.Deregister(this, OnProjectileSetDefaults);
                 ServerApi.Hooks.GameUpdate.Deregister(this, OnGameUpdate);
             }
             base.Dispose(disposing);
         }
 
-        private void TempestCommand(CommandArgs args)
+        private void CheckStatusCommand(CommandArgs args)
         {
-            if (args.Parameters.Count == 0)
-            {
-                args.Player.SendInfoMessage($"[Tempest Buff] Speed: {speedMultiplier}x | Homing: {homingStrength} | Ukuran: -10% (0.9x).");
-                args.Player.SendInfoMessage("Cara ubah: /tbuff speed <angka> (contoh: 1.5) atau /tbuff homing <angka> (contoh: 0.07)");
-                return;
-            }
-
-            string sub = args.Parameters[0].ToLower();
-
-            if (sub == "speed" && args.Parameters.Count >= 2 && float.TryParse(args.Parameters[1], out float newSpeed))
-            {
-                if (newSpeed < 0.5f || newSpeed > 5.0f)
-                {
-                    args.Player.SendErrorMessage("[Tempest Buff] Kecepatan harus antara 0.5 sampai 5.0!");
-                    return;
-                }
-
-                speedMultiplier = newSpeed;
-                args.Player.SendSuccessMessage($"[Tempest Buff] Kecepatan proyektil diatur ke {speedMultiplier}x!");
-            }
-            else if (sub == "homing" && args.Parameters.Count >= 2 && float.TryParse(args.Parameters[1], out float newHoming))
-            {
-                if (newHoming < 0f || newHoming > 0.5f)
-                {
-                    args.Player.SendErrorMessage("[Tempest Buff] Kekuatan homing harus antara 0 (mati) sampai 0.5!");
-                    return;
-                }
-
-                homingStrength = newHoming;
-                args.Player.SendSuccessMessage($"[Tempest Buff] Kekuatan homing diatur ke {homingStrength}!");
-            }
-            else
-            {
-                args.Player.SendErrorMessage("Format salah! Gunakan: /tbuff, /tbuff speed <angka>, atau /tbuff homing <angka>");
-            }
-        }
-
-        private void OnProjectileSetDefaults(SetDefaultsEventArgs<Projectile, int> args)
-        {
-            Projectile proj = args.Object;
-            if (proj == null)
-                return;
-
-            if (proj.type == ProjectileID.Tempest || proj.type == ProjectileID.MiniSharkron)
-            {
-                proj.scale *= 0.9f;
-                proj.width = (int)Math.Max(4, Math.Round(proj.width * 0.9f));
-                proj.height = (int)Math.Max(4, Math.Round(proj.height * 0.9f));
-
-                if (proj.type == ProjectileID.Tempest)
-                {
-                    proj.extraUpdates = 1;
-                }
-            }
+            args.Player.SendSuccessMessage("[TempestStaffBuff] Aktif! Mini Sharkron otomatis mengejar musuh terdekat.");
         }
 
         private void OnGameUpdate(EventArgs args)
         {
-            updateCounter++;
-
-            for (int i = 0; i < Main.maxProjectiles; i++)
+            for (int p = 0; p < Main.maxProjectiles; p++)
             {
-                Projectile proj = Main.projectile[i];
-                if (proj == null || !proj.active)
+                Projectile proj = Main.projectile[p];
+
+                if (!proj.active || proj.type != ProjectileID.MiniSharkron)
                     continue;
 
-                if (proj.owner < 0 || proj.owner >= Main.maxPlayers)
+                int owner = proj.owner;
+                if (owner < 0 || owner >= Main.maxPlayers)
                     continue;
 
-                TSPlayer tsPlayer = TShock.Players[proj.owner];
-                if (tsPlayer == null || !tsPlayer.Active || !tsPlayer.HasPermission("tempest.buff"))
+                TSPlayer tsPlayer = TShock.Players[owner];
+                if (tsPlayer == null || !tsPlayer.Active || tsPlayer.TPlayer == null)
                     continue;
 
-                if (proj.type == ProjectileID.MiniSharkron)
+                if (!tsPlayer.HasPermission("tempest.buff"))
+                    continue;
+
+                NPC target = FindClosestTarget(proj.Center, MaxHomingRange);
+                if (target != null)
                 {
-                    if (proj.timeLeft >= 358 && proj.localAI[1] == 0f)
-                    {
-                        proj.velocity *= speedMultiplier;
-                        proj.localAI[1] = 1f;
-                        NetMessage.SendData((int)PacketTypes.ProjectileNew, -1, -1, null, proj.whoAmI);
-                    }
+                    float speed = proj.velocity.Length();
+                    if (speed < 12f)
+                        speed = 16f;
 
-                    if (homingStrength > 0f && updateCounter % 3 == 0)
+                    Vector2 desiredDir = target.Center - proj.Center;
+                    if (desiredDir.LengthSquared() > 0.01f)
                     {
-                        ApplySoftHoming(proj);
+                        desiredDir.Normalize();
+                        Vector2 targetVel = desiredDir * speed;
+                        proj.velocity = Vector2.Lerp(proj.velocity, targetVel, HomingStrength);
+
+                        if (proj.timeLeft % 3 == 0)
+                        {
+                            NetMessage.SendData((int)PacketTypes.ProjectileNew, -1, -1, null, p);
+                        }
                     }
                 }
             }
         }
 
-        private void ApplySoftHoming(Projectile proj)
+        private NPC FindClosestTarget(Vector2 position, float maxRange)
         {
-            float maxDetectDistance = 400f;
-            NPC closestTarget = null;
-            float closestDist = maxDetectDistance;
+            NPC closest = null;
+            float bestDistSq = maxRange * maxRange;
 
             for (int n = 0; n < Main.maxNPCs; n++)
             {
                 NPC npc = Main.npc[n];
-                if (npc != null && npc.active && !npc.friendly && !npc.dontTakeDamage && npc.lifeMax > 5 && npc.CanBeChasedBy(proj))
+                if (!npc.active || npc.friendly || npc.dontTakeDamage || npc.immortal || npc.lifeMax <= 5)
+                    continue;
+
+                float distSq = Vector2.DistanceSquared(position, npc.Center);
+                if (distSq < bestDistSq)
                 {
-                    float dist = Vector2.Distance(proj.Center, npc.Center);
-                    if (dist < closestDist)
-                    {
-                        if (Collision.CanHitLine(proj.position, proj.width, proj.height, npc.position, npc.width, npc.height))
-                        {
-                            closestDist = dist;
-                            closestTarget = npc;
-                        }
-                    }
+                    bestDistSq = distSq;
+                    closest = npc;
                 }
             }
 
-            if (closestTarget != null)
-            {
-                float currentSpeed = proj.velocity.Length();
-                if (currentSpeed <= 0.1f)
-                    return;
-
-                Vector2 desiredDirection = closestTarget.Center - proj.Center;
-                desiredDirection.Normalize();
-                Vector2 desiredVelocity = desiredDirection * currentSpeed;
-
-                proj.velocity = Vector2.Lerp(proj.velocity, desiredVelocity, homingStrength);
-                proj.velocity.Normalize();
-                proj.velocity *= currentSpeed;
-
-                NetMessage.SendData((int)PacketTypes.ProjectileNew, -1, -1, null, proj.whoAmI);
-            }
+            return closest;
         }
     }
 }
